@@ -18,9 +18,6 @@ from utils import (
 # ============================================================
 # SCROLLABLE FRAME
 # ============================================================
-#
-# ĐÂY LÀ PHẦN ĐÃ SỬA CHÍNH.
-#
 # Không còn canvas lồng với main.py.
 # Chỉ màn hình này quản lý scrollbar.
 # ============================================================
@@ -33,17 +30,39 @@ class ScrollableFrame(ttk.Frame):
     ):
         super().__init__(parent)
 
+        # ========================================================
+        # CANVAS
+        # ========================================================
+
         self.canvas = tk.Canvas(
             self,
             highlightthickness=0,
             borderwidth=0,
         )
 
-        self.scrollbar = ttk.Scrollbar(
+        # ========================================================
+        # SCROLLBAR DỌC
+        # ========================================================
+
+        self.v_scrollbar = ttk.Scrollbar(
             self,
             orient="vertical",
             command=self.canvas.yview,
         )
+
+        # ========================================================
+        # SCROLLBAR NGANG
+        # ========================================================
+
+        self.h_scrollbar = ttk.Scrollbar(
+            self,
+            orient="horizontal",
+            command=self.canvas.xview,
+        )
+
+        # ========================================================
+        # FRAME CHỨA TOÀN BỘ NỘI DUNG
+        # ========================================================
 
         self.inner = ttk.Frame(self.canvas)
 
@@ -53,22 +72,50 @@ class ScrollableFrame(ttk.Frame):
             anchor="nw",
         )
 
-        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+        # ========================================================
+        # KẾT NỐI SCROLLBAR
+        # ========================================================
 
-        self.canvas.pack(
-            side="left",
-            fill="both",
-            expand=True,
+        self.canvas.configure(
+            yscrollcommand=self.v_scrollbar.set,
+            xscrollcommand=self.h_scrollbar.set,
         )
 
-        self.scrollbar.pack(
-            side="right",
-            fill="y",
+        # ========================================================
+        # LAYOUT
+        # ========================================================
+
+        self.canvas.grid(
+            row=0,
+            column=0,
+            sticky="nsew",
         )
 
-        # ----------------------------------------------------
-        # Cập nhật vùng scroll
-        # ----------------------------------------------------
+        self.v_scrollbar.grid(
+            row=0,
+            column=1,
+            sticky="ns",
+        )
+
+        self.h_scrollbar.grid(
+            row=1,
+            column=0,
+            sticky="ew",
+        )
+
+        self.rowconfigure(
+            0,
+            weight=1,
+        )
+
+        self.columnconfigure(
+            0,
+            weight=1,
+        )
+
+        # ========================================================
+        # CẬP NHẬT VÙNG SCROLL
+        # ========================================================
 
         self.inner.bind(
             "<Configure>",
@@ -77,15 +124,12 @@ class ScrollableFrame(ttk.Frame):
 
         self.canvas.bind(
             "<Configure>",
-            self._resize_inner,
+            self._on_canvas_configure,
         )
 
-        # ----------------------------------------------------
-        # Mouse wheel
-        #
-        # Không bind_all ngay từ đầu.
-        # Chỉ nhận chuột khi chuột đang ở form này.
-        # ----------------------------------------------------
+        # ========================================================
+        # MOUSE WHEEL
+        # ========================================================
 
         self.canvas.bind(
             "<Enter>",
@@ -107,28 +151,73 @@ class ScrollableFrame(ttk.Frame):
             self._unbind_mousewheel,
         )
 
-        # ----------------------------------------------------
-        # Luôn bắt đầu ở đầu form
-        # ----------------------------------------------------
+        # ========================================================
+        # SHIFT + MOUSE WHEEL
+        # -> CUỘN NGANG
+        # ========================================================
+
+        self.canvas.bind(
+            "<Shift-MouseWheel>",
+            self._on_shift_mousewheel,
+        )
+
+        self.inner.bind(
+            "<Shift-MouseWheel>",
+            self._on_shift_mousewheel,
+        )
+
+        # ========================================================
+        # PHÍM MŨI TÊN
+        # ========================================================
+
+        self.canvas.bind(
+            "<Left>",
+            self._scroll_left,
+        )
+
+        self.canvas.bind(
+            "<Right>",
+            self._scroll_right,
+        )
+
+        # ========================================================
+        # LUÔN BẮT ĐẦU Ở ĐẦU
+        # ========================================================
 
         self.after_idle(self.scroll_to_top)
+
+    # ========================================================
+    # SCROLL REGION
+    # ========================================================
 
     def _update_scrollregion(
         self,
         event=None,
     ):
-        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        bbox = self.canvas.bbox("all")
 
-    def _resize_inner(
+        if bbox:
+            self.canvas.configure(scrollregion=bbox)
+
+    # ========================================================
+    # CANVAS RESIZE
+    # ========================================================
+
+    def _on_canvas_configure(
         self,
         event,
     ):
-        self.canvas.itemconfigure(
-            self.window_id,
-            width=event.width,
-        )
+        """
+        Không ép chiều rộng inner bằng canvas.
+
+        Đây là điểm quan trọng để scrollbar ngang hoạt động.
+        """
 
         self._update_scrollregion()
+
+    # ========================================================
+    # BIND MOUSE WHEEL
+    # ========================================================
 
     def _bind_mousewheel(
         self,
@@ -139,11 +228,19 @@ class ScrollableFrame(ttk.Frame):
             self._on_mousewheel,
         )
 
+    # ========================================================
+    # UNBIND MOUSE WHEEL
+    # ========================================================
+
     def _unbind_mousewheel(
         self,
         event=None,
     ):
         self.canvas.unbind_all("<MouseWheel>")
+
+    # ========================================================
+    # CUỘN DỌC
+    # ========================================================
 
     def _on_mousewheel(
         self,
@@ -155,8 +252,63 @@ class ScrollableFrame(ttk.Frame):
                 "units",
             )
 
-    def scroll_to_top(self):
+    # ========================================================
+    # SHIFT + MOUSE WHEEL
+    # -> CUỘN NGANG
+    # ========================================================
+
+    def _on_shift_mousewheel(
+        self,
+        event,
+    ):
+        if event.delta:
+            self.canvas.xview_scroll(
+                int(-1 * (event.delta / 120)),
+                "units",
+            )
+
+        return "break"
+
+    # ========================================================
+    # CUỘN SANG TRÁI
+    # ========================================================
+
+    def _scroll_left(
+        self,
+        event=None,
+    ):
+        self.canvas.xview_scroll(
+            -3,
+            "units",
+        )
+
+        return "break"
+
+    # ========================================================
+    # CUỘN SANG PHẢI
+    # ========================================================
+
+    def _scroll_right(
+        self,
+        event=None,
+    ):
+        self.canvas.xview_scroll(
+            3,
+            "units",
+        )
+
+        return "break"
+
+    # ========================================================
+    # VỀ ĐẦU
+    # ========================================================
+
+    def scroll_to_top(
+        self,
+    ):
         self.canvas.yview_moveto(0)
+
+        self.canvas.xview_moveto(0)
 
 
 # ============================================================

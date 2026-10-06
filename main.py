@@ -2,10 +2,76 @@ import os
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-from tkinterdnd2 import DND_FILES, TkinterDnD
+from tkinterdnd2 import TkinterDnD
 
 from hop_dong_duyet_gia import HopDongDuyetGiaFrame
-from NghiemThu_scrollbar_fixed import NghiemThuFrame
+from nghiem_thu_thanh_ly import NghiemThuFrame
+
+
+class ToolTip:
+    """Tooltip nhỏ hiển thị khi rê chuột lên nút."""
+
+    def __init__(self, widget, text, delay=400):
+        self.widget = widget
+        self.text = text
+        self.delay = delay
+        self.tipwindow = None
+        self.after_id = None
+
+        widget.bind("<Enter>", self._schedule, add="+")
+        widget.bind("<Leave>", self._hide, add="+")
+
+    def _schedule(self, _event=None):
+        self._cancel()
+        self.after_id = self.widget.after(
+            self.delay,
+            self._show,
+        )
+
+    def _cancel(self):
+        if self.after_id is not None:
+            try:
+                self.widget.after_cancel(self.after_id)
+            except Exception:
+                pass
+            self.after_id = None
+
+    def _show(self):
+        if self.tipwindow is not None:
+            return
+
+        try:
+            x = self.widget.winfo_rootx() + self.widget.winfo_width() + 8
+            y = self.widget.winfo_rooty() + max(0, self.widget.winfo_height() // 2 - 12)
+
+            self.tipwindow = tw = tk.Toplevel(self.widget)
+            tw.wm_overrideredirect(True)
+            tw.wm_geometry(f"+{x}+{y}")
+
+            label = tk.Label(
+                tw,
+                text=self.text,
+                justify="left",
+                background="#333333",
+                foreground="white",
+                relief="solid",
+                borderwidth=1,
+                padx=8,
+                pady=5,
+                font=("Arial", 9),
+            )
+            label.pack()
+        except Exception:
+            self.tipwindow = None
+
+    def _hide(self, _event=None):
+        self._cancel()
+        if self.tipwindow is not None:
+            try:
+                self.tipwindow.destroy()
+            except Exception:
+                pass
+            self.tipwindow = None
 
 
 class MainApp:
@@ -14,7 +80,13 @@ class MainApp:
 
         self.root.title("Hệ thống quản lý tài liệu")
         self.root.geometry("1200x750")
-        self.root.minsize(1200, 750)
+        self.root.minsize(900, 550)
+
+        # Trạng thái sidebar
+        self.sidebar_collapsed = False
+        self.sidebar_open_width = 235
+        self.sidebar_closed_width = 58
+        self.sidebar_buttons = []
 
         # ==================================================
         # STYLE
@@ -174,28 +246,82 @@ class MainApp:
         # SIDEBAR
         # ==================================================
 
-        sidebar = ttk.LabelFrame(
+        self.sidebar = ttk.LabelFrame(
             body,
             text="Chức năng",
         )
 
-        sidebar.pack(
+        self.sidebar.pack(
             side="left",
             fill="y",
             padx=(0, 15),
         )
 
+        self.sidebar.configure(width=self.sidebar_open_width)
+        self.sidebar.pack_propagate(False)
+
+        # Nút thu gọn / mở rộng
+        self.sidebar_toggle = ttk.Button(
+            self.sidebar,
+            text="◀",
+            style="Menu.TButton",
+            command=self.toggle_sidebar,
+        )
+        self.sidebar_toggle.pack(
+            fill="x",
+            padx=6,
+            pady=(8, 10),
+        )
+        ToolTip(
+            self.sidebar_toggle,
+            "Thu gọn / mở rộng thanh chức năng",
+        )
+
+        # Các nút menu
+        self._create_sidebar_button(
+            "📄",
+            "Tạo duyệt giá - hợp đồng",
+            self.show_documents,
+        )
+
+        self._create_sidebar_button(
+            "📋",
+            "Biên bản nghiệm thu",
+            self.show_nghiem_thu,
+        )
+
+        self._create_sidebar_button(
+            "⚙",
+            "Cài đặt",
+            self.show_settings,
+        )
+
+        self._create_sidebar_button(
+            "📁",
+            "Mở thư mục templates",
+            lambda: self.open_dir("./templates"),
+        )
+
+        self._create_sidebar_button(
+            "📁",
+            "Mở thư mục outputs",
+            lambda: self.open_dir("./outputs"),
+        )
+
+        self._create_sidebar_button(
+            "🗑",
+            "Xóa file outputs",
+            self.clear_outputs,
+        )
+
+        self._create_sidebar_button(
+            "❌",
+            "Thoát",
+            self.exit_app,
+        )
+
         # ==================================================
         # CONTENT
-        # ==================================================
-        #
-        # QUAN TRỌNG:
-        # Không tạo Canvas/Scrollbar ở đây.
-        #
-        # Các màn hình con như HopDongDuyetGiaFrame
-        # sẽ tự quản lý scrollbar của chúng.
-        #
-        # Tránh lỗi scrollbar lồng nhau.
         # ==================================================
 
         content_container = ttk.Frame(body)
@@ -217,91 +343,79 @@ class MainApp:
         )
 
         # ==================================================
-        # MENU
-        # ==================================================
-
-        ttk.Button(
-            sidebar,
-            text="📄  Tạo duyệt giá - hợp đồng",
-            style="Menu.TButton",
-            command=self.show_documents,
-        ).pack(
-            fill="x",
-            padx=10,
-            pady=10,
-        )
-
-        ttk.Button(
-            sidebar,
-            text="📋  Biên bản nghiệm thu",
-            style="Menu.TButton",
-            command=self.show_nghiem_thu,
-        ).pack(
-            fill="x",
-            padx=10,
-            pady=10,
-        )
-
-        ttk.Button(
-            sidebar,
-            text="⚙  Cài đặt",
-            style="Menu.TButton",
-            command=self.show_settings,
-        ).pack(
-            fill="x",
-            padx=10,
-            pady=10,
-        )
-
-        ttk.Button(
-            sidebar,
-            text="📁 Mở thư mục templates",
-            style="Menu.TButton",
-            command=lambda: self.open_dir("./templates"),
-        ).pack(
-            fill="x",
-            padx=10,
-            pady=10,
-        )
-
-        ttk.Button(
-            sidebar,
-            text="📁 Mở thư mục outputs",
-            style="Menu.TButton",
-            command=lambda: self.open_dir("./outputs"),
-        ).pack(
-            fill="x",
-            padx=10,
-            pady=10,
-        )
-
-        ttk.Button(
-            sidebar,
-            text="🗑  Xóa file outputs",
-            style="Menu.TButton",
-            command=self.clear_outputs,
-        ).pack(
-            fill="x",
-            padx=10,
-            pady=10,
-        )
-
-        ttk.Button(
-            sidebar,
-            text="❌  Thoát",
-            style="Menu.TButton",
-            command=self.exit_app,
-        ).pack(
-            fill="x",
-            padx=10,
-            pady=10,
-        )
-
-        # ==================================================
         # HOME
         # ==================================================
 
         self.show_home()
+
+    # ======================================================
+    # SIDEBAR
+    # ======================================================
+
+    def _create_sidebar_button(self, icon, label, command):
+        """Tạo nút sidebar và lưu lại để đổi giữa 2 trạng thái."""
+        button = ttk.Button(
+            self.sidebar,
+            text=f"{icon}  {label}",
+            style="Menu.TButton",
+            command=command,
+        )
+        button.pack(
+            fill="x",
+            padx=6,
+            pady=5,
+        )
+
+        ToolTip(button, label)
+
+        self.sidebar_buttons.append(
+            {
+                "button": button,
+                "icon": icon,
+                "label": label,
+            }
+        )
+
+        return button
+
+    def toggle_sidebar(self):
+        """Thu gọn sidebar thành một cột icon hoặc mở lại."""
+        self.sidebar_collapsed = not self.sidebar_collapsed
+
+        if self.sidebar_collapsed:
+            self.sidebar.configure(
+                width=self.sidebar_closed_width,
+                text="",
+            )
+
+            self.sidebar_toggle.configure(
+                text="▶",
+            )
+
+            for item in self.sidebar_buttons:
+                item["button"].configure(
+                    text=item["icon"],
+                    width=3,
+                )
+
+        else:
+            self.sidebar.configure(
+                width=self.sidebar_open_width,
+                text="Chức năng",
+            )
+
+            self.sidebar_toggle.configure(
+                text="◀",
+            )
+
+            for item in self.sidebar_buttons:
+                item["button"].configure(
+                    text=f"{item['icon']}  {item['label']}",
+                    width=0,
+                )
+
+        # Cập nhật giao diện ngay lập tức
+        self.root.update_idletasks()
 
     # ======================================================
     # CLEAR CONTENT
