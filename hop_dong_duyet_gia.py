@@ -1,28 +1,25 @@
 import os
 import re
 import tkinter as tk
-from copy import deepcopy
 from datetime import datetime
 from tkinter import filedialog, messagebox, ttk
-
-from openpyxl import load_workbook
-from openpyxl.cell.cell import MergedCell
-from tkinterdnd2 import DND_FILES
-
 from zoneinfo import ZoneInfo
 
-VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
+from openpyxl import load_workbook
 
+
+VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
+from services import export_duyet_gia
+from ui import ScrollableFrame
 from utils import (
-    auto_fit_row_heights,
     format_money,
+    generate_docx,
     number_to_vietnamese_words,
+    open_dir,
     open_file,
     parse_number,
-    prepare_product_area,
-    restore_template_drawing,
+    setup_file_drop,
 )
-from utils.document_utils import generate_docx
 
 # ============================================================
 # CẤU HÌNH
@@ -36,400 +33,10 @@ DEFAULT_CONTRACT_OUTPUT_DIR = "./outputs/contracts"
 
 MAX_VENDORS = 3
 
-# ============================================================
-# XUẤT EXCEL
-# ============================================================
-
-
-def export_duyet_gia(
-    data,
-    template_path,
-    output_path,
-):
-    if not os.path.exists(template_path):
-        raise FileNotFoundError(
-            "Không tìm thấy file mẫu:\n" + os.path.abspath(template_path)
-        )
-
-    wb = load_workbook(template_path)
-
-    if "Bộ 01" not in wb.sheetnames:
-        raise ValueError("File Excel không có sheet 'Bộ 01'.")
-
-    ws = wb["Bộ 01"]
-
-    vendors = data["vendors"]
-    products = data["products"]
-
-    if not vendors:
-        raise ValueError("Phải có ít nhất 1 nhà cung cấp.")
-
-    if len(vendors) > MAX_VENDORS:
-        raise ValueError(f"Mẫu này chỉ hỗ trợ tối đa {MAX_VENDORS} nhà cung cấp.")
-
-    if not products:
-        raise ValueError("Phải có ít nhất 1 hạng mục.")
-
-    # ========================================================
-    # THÔNG TIN CHUNG
-    # ========================================================
-
-    so_duyet = data["so_duyet"].strip()
-    ngay = data["ngay"].strip()
-    thang = data["thang"].strip()
-    nam = data["nam"].strip()
-
-    ten_duyet_gia = data["ten_duyet_gia"].strip()
-
-    muc_dich = data["muc_dich_mua_sam"].strip()
-
-    dia_diem = data["dia_diem"].strip()
-
-    ws["A4"] = f"Số: {so_duyet}/KTCN"
-
-    ws["F4"] = f"{dia_diem}, ngày {ngay} tháng {thang} năm {nam}"
-
-    ws["A6"] = f"Ngày {ngay} tháng {thang} năm {nam}"
-
-    ws["F5"] = f"ĐÁNH GIÁ VÀ ĐỀ XUẤT\nLựa chọn nhà cung cấp mua sắm\n{ten_duyet_gia}"
-
-    # ========================================================
-    # DANH SÁCH NHÀ CUNG CẤP
-    # ========================================================
-
-    vendor_sentence = (
-        "        Căn cứ yêu cầu mua sắm "
-        f"thiết bị, dịch vụ {muc_dich}, "
-        "Phòng KTCN đã yêu cầu báo giá "
-        "cung cấp của "
-        f"{len(vendors):02d} nhà cung cấp sau:"
-    )
-
-    for i, vendor in enumerate(
-        vendors,
-        start=1,
-    ):
-        vendor_sentence += f"\n{i}. {vendor['name'].strip()}"
-
-    ws["A13"] = vendor_sentence
-
-    # ========================================================
-    # TÊN NCC
-    # ========================================================
-
-    for col in range(5, 8):
-        cell = ws.cell(
-            16,
-            col,
-        )
-
-        if isinstance(
-            cell,
-            MergedCell,
-        ):
-            raise ValueError(
-                f"Ô {cell.coordinate} đang là MergedCell. Kiểm tra merge ở hàng 16."
-            )
-
-        cell.value = None
-
-    for index, vendor in enumerate(vendors):
-        col = 5 + index
-
-        ws.cell(
-            16,
-            col,
-        ).value = vendor["name"].strip()
-
-    # ========================================================
-    # KHU VỰC SẢN PHẨM
-    # ========================================================
-
-    first_product_row = 18
-
-    prepare_product_area(
-        ws,
-        len(products),
-    )
-
-    evaluation_start = first_product_row + len(products)
-
-    for index, product in enumerate(products):
-        row = first_product_row + index
-
-        ws.cell(
-            row,
-            1,
-        ).value = f"1.{index + 1}"
-
-        ws.cell(
-            row,
-            2,
-        ).value = product["name"].strip()
-
-        quantity = product["quantity"].strip()
-
-        try:
-            quantity_value = float(quantity)
-
-            if quantity_value.is_integer():
-                quantity_value = int(quantity_value)
-
-        except ValueError:
-            quantity_value = quantity
-
-        ws.cell(
-            row,
-            3,
-        ).value = quantity_value
-
-        ws.cell(
-            row,
-            4,
-        ).value = product["unit"].strip()
-
-        prices = []
-
-        for vendor_index in range(MAX_VENDORS):
-            col = 5 + vendor_index
-
-            if vendor_index < len(vendors):
-                price = parse_number(product["prices"][vendor_index])
-
-                ws.cell(
-                    row,
-                    col,
-                ).value = price
-
-                ws.cell(
-                    row,
-                    col,
-                ).number_format = "#,##0"
-
-                prices.append(price)
-
-            else:
-                ws.cell(
-                    row,
-                    col,
-                ).value = None
-
-        if not prices:
-            raise ValueError(f"Hạng mục {index + 1} chưa có giá.")
-
-        min_price = min(prices)
-
-        ws.cell(
-            row,
-            8,
-        ).value = min_price
-
-        ws.cell(
-            row,
-            8,
-        ).number_format = "#,##0"
-
-        min_index = prices.index(min_price)
-
-        ws.cell(
-            row,
-            9,
-        ).value = vendors[min_index]["name"].strip()
-
-        ws.cell(
-            row,
-            10,
-        ).value = product.get(
-            "note",
-            "",
-        ).strip()
-
-    # ========================================================
-    # ĐÁNH GIÁ NCC
-    # ========================================================
-
-    row_capacity = evaluation_start
-
-    row_technical = evaluation_start + 1
-
-    row_delivery = evaluation_start + 2
-
-    row_time = evaluation_start + 3
-
-    row_payment = evaluation_start + 4
-
-    row_proposal = evaluation_start + 5
-
-    labels = {
-        row_capacity: "Đánh giá về năng lực và KN",
-        row_technical: "Đánh giá về đáp ứng yêu cầu KT",
-        row_delivery: "Địa điểm giao hàng/thực hiện",
-        row_time: "Thời gian thực hiện hợp đồng",
-        row_payment: "Thời hạn thanh toán",
-    }
-
-    for row, label in labels.items():
-        ws.cell(
-            row,
-            1,
-        ).value = row - evaluation_start + 2
-
-        ws.cell(
-            row,
-            2,
-        ).value = label
-
-    for vendor_index, vendor in enumerate(vendors):
-        col = 5 + vendor_index
-
-        ws.cell(
-            row_capacity,
-            col,
-        ).value = vendor["nang_luc"].strip()
-
-        ws.cell(
-            row_technical,
-            col,
-        ).value = vendor["ky_thuat"].strip()
-
-        ws.cell(
-            row_delivery,
-            col,
-        ).value = vendor["dia_diem"].strip()
-
-        ws.cell(
-            row_time,
-            col,
-        ).value = vendor["thoi_gian"].strip()
-
-        ws.cell(
-            row_payment,
-            col,
-        ).value = vendor["cach_thanh_toan"].strip()
-
-    for vendor_index in range(
-        len(vendors),
-        MAX_VENDORS,
-    ):
-        col = 5 + vendor_index
-
-        for row in labels:
-            ws.cell(
-                row,
-                col,
-            ).value = None
-
-    # ========================================================
-    # TỔNG GIÁ
-    # ========================================================
-
-    vendor_totals = [0 for _ in vendors]
-
-    for product in products:
-        quantity = parse_number(product["quantity"])
-
-        for i in range(len(vendors)):
-            vendor_totals[i] += parse_number(product["prices"][i]) * quantity
-
-    selected_index = vendor_totals.index(min(vendor_totals))
-
-    selected_vendor = vendors[selected_index]["name"].strip()
-
-    selected_total = vendor_totals[selected_index]
-
-    # ========================================================
-    # ĐỀ XUẤT
-    # ========================================================
-
-    proposal = (
-        "        Phòng KTCN đề xuất "
-        "Thủ trưởng Nhà máy cho mua "
-        "các hạng mục từ "
-        f"{selected_vendor} vì có tổng "
-        "giá chào thấp nhất trong các "
-        "nhà cung cấp được đánh giá, "
-        "đáp ứng các yêu cầu về vật tư, "
-        "kỹ thuật và khả năng thực hiện."
-    )
-
-    target_merge = f"A{row_proposal}:J{row_proposal}"
-
-    already_merged = any(str(rng) == target_merge for rng in ws.merged_cells.ranges)
-
-    if not already_merged:
-        for rng in list(ws.merged_cells.ranges):
-            min_col, min_row, max_col, max_row = rng.bounds
-
-            if (
-                min_row == row_proposal
-                and max_row == row_proposal
-                and min_col <= 1 <= max_col
-            ):
-                ws.unmerge_cells(str(rng))
-
-        ws.merge_cells(target_merge)
-
-    ws.cell(
-        row_proposal,
-        1,
-    ).value = proposal
-
-    # ========================================================
-    # COMMENT TỔNG GIÁ
-    # ========================================================
-
-    from openpyxl.comments import Comment
-
-    for i, total in enumerate(vendor_totals):
-        col = 5 + i
-
-        ws.cell(
-            16,
-            col,
-        ).comment = Comment(
-            f"Tổng giá chưa VAT: {format_money(total)} đồng",
-            "Python",
-        )
-
-    # ========================================================
-    # FORMAT
-    # ========================================================
-
-    auto_fit_row_heights(
-        ws,
-        min_row=17,
-        max_row=ws.max_row,
-        min_height=15.0,
-        max_height=409.0,
-    )
-
-    ws.sheet_view.showGridLines = False
-
-    os.makedirs(
-        os.path.dirname(os.path.abspath(output_path)),
-        exist_ok=True,
-    )
-
-    wb.save(output_path)
-
-    restore_template_drawing(
-        template_path,
-        output_path,
-    )
-
-    return {
-        "output_path": os.path.abspath(output_path),
-        "selected_vendor": selected_vendor,
-        "selected_total": selected_total,
-        "vendor_totals": vendor_totals,
-    }
-
 
 # ============================================================
 # WORD
 # ============================================================
-
-
 def generate_contract_docx(self):
     try:
         # ============================================================
@@ -523,10 +130,12 @@ def generate_contract_docx(self):
                 {
                     "id": product_id,
                     "name": name,
+                    "brand": str(product.get("brand", "")).strip(),
                     "unit": unit,
                     "quantity": quantity,
                     "price": format_money(price),
                     "amount": format_money(amount),
+                    "warranty": str(product.get("warranty", "")).strip(),
                 }
             )
 
@@ -598,7 +207,7 @@ def generate_contract_docx(self):
         # Làm sạch tên file
         ma_hd = re.sub(r'[\\/:*?"<>|]+', "_", str(ma_hd))
 
-        output_filename = f"HD{context.get('loai_hd', 'DV')}_{ma_hd}{datetime.now(VN_TZ).strftime('%Y%m%d_%H%M%S')}.docx"
+        output_filename = f"HD{context.get('loai_hd', 'DV') == 'Mua bán' and 'MB' or 'DV'}_{ma_hd}{datetime.now(VN_TZ).strftime('%Y%m%d_%H%M%S')}.docx"
 
         # ============================================================
         # 9. XUẤT WORD BẰNG generate_docx()
@@ -642,302 +251,6 @@ def generate_contract_docx(self):
 
 
 # ============================================================
-# SCROLLABLE FRAME
-# ============================================================
-# Không còn canvas lồng với main.py.
-# Chỉ màn hình này quản lý scrollbar.
-# ============================================================
-
-
-class ScrollableFrame(ttk.Frame):
-    def __init__(
-        self,
-        parent,
-    ):
-        super().__init__(parent)
-
-        # ========================================================
-        # CANVAS
-        # ========================================================
-
-        self.canvas = tk.Canvas(
-            self,
-            highlightthickness=0,
-            borderwidth=0,
-        )
-
-        # ========================================================
-        # SCROLLBAR DỌC
-        # ========================================================
-
-        self.v_scrollbar = ttk.Scrollbar(
-            self,
-            orient="vertical",
-            command=self.canvas.yview,
-        )
-
-        # ========================================================
-        # SCROLLBAR NGANG
-        # ========================================================
-
-        self.h_scrollbar = ttk.Scrollbar(
-            self,
-            orient="horizontal",
-            command=self.canvas.xview,
-        )
-
-        # ========================================================
-        # FRAME CHỨA TOÀN BỘ NỘI DUNG
-        # ========================================================
-
-        self.inner = ttk.Frame(self.canvas)
-
-        self.window_id = self.canvas.create_window(
-            (0, 0),
-            window=self.inner,
-            anchor="nw",
-        )
-
-        # ========================================================
-        # KẾT NỐI SCROLLBAR
-        # ========================================================
-
-        self.canvas.configure(
-            yscrollcommand=self.v_scrollbar.set,
-            xscrollcommand=self.h_scrollbar.set,
-        )
-
-        # ========================================================
-        # LAYOUT
-        # ========================================================
-
-        self.canvas.grid(
-            row=0,
-            column=0,
-            sticky="nsew",
-        )
-
-        self.v_scrollbar.grid(
-            row=0,
-            column=1,
-            sticky="ns",
-        )
-
-        self.h_scrollbar.grid(
-            row=1,
-            column=0,
-            sticky="ew",
-        )
-
-        self.rowconfigure(
-            0,
-            weight=1,
-        )
-
-        self.columnconfigure(
-            0,
-            weight=1,
-        )
-
-        # ========================================================
-        # CẬP NHẬT VÙNG SCROLL
-        # ========================================================
-
-        self.inner.bind(
-            "<Configure>",
-            self._update_scrollregion,
-        )
-
-        self.canvas.bind(
-            "<Configure>",
-            self._on_canvas_configure,
-        )
-
-        # ========================================================
-        # MOUSE WHEEL
-        # ========================================================
-
-        self.canvas.bind(
-            "<Enter>",
-            self._bind_mousewheel,
-        )
-
-        self.canvas.bind(
-            "<Leave>",
-            self._unbind_mousewheel,
-        )
-
-        self.inner.bind(
-            "<Enter>",
-            self._bind_mousewheel,
-        )
-
-        self.inner.bind(
-            "<Leave>",
-            self._unbind_mousewheel,
-        )
-
-        # ========================================================
-        # SHIFT + MOUSE WHEEL
-        # -> CUỘN NGANG
-        # ========================================================
-
-        self.canvas.bind(
-            "<Shift-MouseWheel>",
-            self._on_shift_mousewheel,
-        )
-
-        self.inner.bind(
-            "<Shift-MouseWheel>",
-            self._on_shift_mousewheel,
-        )
-
-        # ========================================================
-        # PHÍM MŨI TÊN
-        # ========================================================
-
-        self.canvas.bind(
-            "<Left>",
-            self._scroll_left,
-        )
-
-        self.canvas.bind(
-            "<Right>",
-            self._scroll_right,
-        )
-
-        # ========================================================
-        # LUÔN BẮT ĐẦU Ở ĐẦU
-        # ========================================================
-
-        self.after_idle(self.scroll_to_top)
-
-    # ========================================================
-    # SCROLL REGION
-    # ========================================================
-
-    def _update_scrollregion(
-        self,
-        event=None,
-    ):
-        bbox = self.canvas.bbox("all")
-
-        if bbox:
-            self.canvas.configure(scrollregion=bbox)
-
-    # ========================================================
-    # CANVAS RESIZE
-    # ========================================================
-
-    def _on_canvas_configure(
-        self,
-        event,
-    ):
-        """
-        Không ép chiều rộng inner bằng canvas.
-
-        Đây là điểm quan trọng để scrollbar ngang hoạt động.
-        """
-
-        self._update_scrollregion()
-
-    # ========================================================
-    # BIND MOUSE WHEEL
-    # ========================================================
-
-    def _bind_mousewheel(
-        self,
-        event=None,
-    ):
-        self.canvas.bind_all(
-            "<MouseWheel>",
-            self._on_mousewheel,
-        )
-
-    # ========================================================
-    # UNBIND MOUSE WHEEL
-    # ========================================================
-
-    def _unbind_mousewheel(
-        self,
-        event=None,
-    ):
-        self.canvas.unbind_all("<MouseWheel>")
-
-    # ========================================================
-    # CUỘN DỌC
-    # ========================================================
-
-    def _on_mousewheel(
-        self,
-        event,
-    ):
-        if event.delta:
-            self.canvas.yview_scroll(
-                int(-1 * (event.delta / 120)),
-                "units",
-            )
-
-    # ========================================================
-    # SHIFT + MOUSE WHEEL
-    # -> CUỘN NGANG
-    # ========================================================
-
-    def _on_shift_mousewheel(
-        self,
-        event,
-    ):
-        if event.delta:
-            self.canvas.xview_scroll(
-                int(-1 * (event.delta / 120)),
-                "units",
-            )
-
-        return "break"
-
-    # ========================================================
-    # CUỘN SANG TRÁI
-    # ========================================================
-
-    def _scroll_left(
-        self,
-        event=None,
-    ):
-        self.canvas.xview_scroll(
-            -3,
-            "units",
-        )
-
-        return "break"
-
-    # ========================================================
-    # CUỘN SANG PHẢI
-    # ========================================================
-
-    def _scroll_right(
-        self,
-        event=None,
-    ):
-        self.canvas.xview_scroll(
-            3,
-            "units",
-        )
-
-        return "break"
-
-    # ========================================================
-    # VỀ ĐẦU
-    # ========================================================
-
-    def scroll_to_top(
-        self,
-    ):
-        self.canvas.yview_moveto(0)
-
-        self.canvas.xview_moveto(0)
-
-
-# ============================================================
 # GIAO DIỆN CHÍNH
 # ============================================================
 
@@ -977,10 +290,18 @@ class HopDongDuyetGiaFrame(ttk.Frame):
         ):
             self.main.canvas.yview_moveto(0)
 
-    # ========================================================
-    # ========================================================
-    # UI
-    # ========================================================
+    # =======================================================
+    # Tính toán
+    # =======================================================
+    def calculate_vendor_totals(self, data):
+        return [
+            sum(
+                parse_number(p["prices"][i]) * parse_number(p["quantity"])
+                for p in data["products"]
+            )
+            for i in range(len(data["vendors"]))
+        ]
+
     # ========================================================
     # NHẬP EXCEL
     # ========================================================
@@ -1138,55 +459,29 @@ class HopDongDuyetGiaFrame(ttk.Frame):
         self.import_excel_file(file_path)
 
     def import_excel_file(self, file_path):
-        """
-        Đọc Excel và tự động điền TOÀN BỘ các field có trong giao diện.
-
-        Excel gồm:
-            - Thông tin chung
-            - Nhà cung cấp
-            - Hạng mục
-            - Hợp đồng
-
-        Nguyên tắc:
-            1. Key trong Excel trùng tên biến/widget trên self
-            -> tự động điền.
-            2. Key trong Excel trùng key trong self.contract_vars
-            -> tự động điền.
-            3. Có alias cho các tên khác nhau giữa Excel và giao diện.
-            4. Nhà cung cấp và Hạng mục được tạo lại từ Excel.
-        """
-
         wb = None
-
         try:
             # ============================================================
             # 1. KIỂM TRA FILE
             # ============================================================
-
             if not file_path:
                 return
-
             file_path = os.path.abspath(file_path)
-
             if not os.path.exists(file_path):
                 raise FileNotFoundError(f"Không tìm thấy file:\n{file_path}")
-
             if not file_path.lower().endswith((".xlsx", ".xlsm")):
                 raise ValueError("Chỉ hỗ trợ file Excel .xlsx hoặc .xlsm.")
 
             # ============================================================
             # 2. MỞ EXCEL
             # ============================================================
-
             wb = load_workbook(
                 file_path,
                 data_only=True,
             )
-
             # ============================================================
             # 3. KIỂM TRA SHEET
             # ============================================================
-
             required_sheets = [
                 "Thông tin chung",
                 "Nhà cung cấp",
@@ -1545,11 +840,13 @@ class HopDongDuyetGiaFrame(ttk.Frame):
             for product in product_rows:
                 vars_ = {
                     "name": tk.StringVar(value=product.get("name", "")),
+                    "brand": tk.StringVar(value=product.get("brand", "")),
                     "quantity": tk.StringVar(value=product.get("quantity", "1")),
                     "unit": tk.StringVar(value=product.get("unit", "Cái")),
                     "price1": tk.StringVar(value=product.get("price1", "")),
                     "price2": tk.StringVar(value=product.get("price2", "")),
                     "price3": tk.StringVar(value=product.get("price3", "")),
+                    "warranty": tk.StringVar(value=product.get("warranty", "")),
                     "note": tk.StringVar(value=product.get("note", "")),
                 }
 
@@ -1612,11 +909,6 @@ class HopDongDuyetGiaFrame(ttk.Frame):
 
             try:
                 self.update_add_button()
-            except Exception:
-                pass
-
-            try:
-                self.update_total()
             except Exception:
                 pass
 
@@ -1799,27 +1091,12 @@ class HopDongDuyetGiaFrame(ttk.Frame):
             pady=(3, 6),
         )
 
-        self.drop_area.drop_target_register(DND_FILES)
-
-        self.drop_area.dnd_bind(
-            "<<Drop>>",
-            self.on_excel_drop,
-        )
-
-        self.drop_area.dnd_bind(
-            "<<DragEnter>>",
-            lambda e: self.drop_area.config(
-                relief="sunken",
-                text=("📥 THẢ FILE EXCEL TẠI ĐÂY"),
-            ),
-        )
-
-        self.drop_area.dnd_bind(
-            "<<DragLeave>>",
-            lambda e: self.drop_area.config(
-                relief="groove",
-                text=("📥 KÉO THẢ FILE EXCEL VÀO ĐÂY\n(.xlsx / .xlsm)"),
-            ),
+        setup_file_drop(
+            widget=self.drop_area,
+            callback=self.import_excel_file,
+            extensions=(".xlsx", ".xlsm"),
+            normal_text="📥 KÉO THẢ FILE EXCEL VÀO ĐÂY\n(.xlsx / .xlsm)",
+            hover_text="📥 THẢ FILE EXCEL TẠI ĐÂY",
         )
 
         ttk.Button(
@@ -1844,7 +1121,6 @@ class HopDongDuyetGiaFrame(ttk.Frame):
         # ----------------------------------------------------
         # CHỈ CÓ MỘT SCROLLABLE FRAME
         # ----------------------------------------------------
-
         self.main = ScrollableFrame(self)
 
         self.main.pack(
@@ -1855,13 +1131,9 @@ class HopDongDuyetGiaFrame(ttk.Frame):
         )
 
         self.create_general_section()
-
         self.create_vendor_section()
-
         self.create_contract_section()
-
         self.create_product_section()
-
         self.create_action_section()
 
     # ========================================================
@@ -2500,31 +1772,30 @@ class HopDongDuyetGiaFrame(ttk.Frame):
     # ========================================================
 
     def create_product_section(self):
-
         frame = ttk.LabelFrame(
             self.main.inner,
             text=" 4. Hạng mục / vật tư ",
             padding=6,
         )
-
-        frame.pack(
-            fill="x",
-            pady=(0, 6),
-        )
+        frame.pack(fill="x", pady=(0, 6))
 
         headers = [
-            "STT",
-            "Tên hạng mục",
-            "Số lượng",
-            "ĐVT",
-            "Giá NCC 1",
-            "Giá NCC 2",
-            "Giá NCC 3",
-            "Ghi chú",
-            "",
+            ("STT", 5),
+            ("Tên hạng mục", 28),
+            ("Hãng", 18),
+            ("Số lượng", 10),
+            ("ĐVT", 8),
+            ("Giá NCC 1", 15),
+            ("Giá NCC 2", 15),
+            ("Giá NCC 3", 15),
+            ("Thời gian bảo hành", 20),
+            ("Ghi chú", 20),
+            ("", 8),
         ]
 
-        for col, text in enumerate(headers):
+        for col, (text, width) in enumerate(headers):
+            frame.columnconfigure(col, weight=width)
+
             ttk.Label(
                 frame,
                 text=text,
@@ -2537,67 +1808,53 @@ class HopDongDuyetGiaFrame(ttk.Frame):
                 pady=3,
             )
 
-        widths = [
-            5,
-            28,
-            10,
-            8,
-            15,
-            15,
-            15,
-            20,
-            8,
-        ]
-
-        for col, weight in enumerate(widths):
-            frame.columnconfigure(
-                col,
-                weight=weight,
-            )
-
         self.product_container = frame
 
-        ttk.Button(
-            frame,
-            text="➕ Thêm hạng mục",
-            command=self.add_product,
-        ).grid(
-            row=999,
-            column=0,
-            columnspan=9,
-            sticky="w",
-            padx=3,
-            pady=8,
-        )
+        self.update_add_button()
 
     def add_product(self):
-
         if len(self.product_rows) >= 100:
-            messagebox.showwarning("Giới hạn", "Không nên có quá 100 hạng mục.")
-
+            messagebox.showwarning(
+                "Giới hạn",
+                "Không nên có quá 100 hạng mục.",
+            )
             return
-
         vars_ = {
             "name": tk.StringVar(),
+            "brand": tk.StringVar(),
             "quantity": tk.StringVar(value="1"),
             "unit": tk.StringVar(value="Cái"),
             "price1": tk.StringVar(),
             "price2": tk.StringVar(),
             "price3": tk.StringVar(),
+            "warranty": tk.StringVar(),
             "note": tk.StringVar(),
         }
-
         self._render_product_row(vars_)
-
         self.update_add_button()
+
+    def _create_entry(self, parent, variable, row, column):
+        entry = ttk.Entry(
+            parent,
+            textvariable=variable,
+        )
+        entry.grid(
+            row=row,
+            column=column,
+            sticky="ew",
+            padx=3,
+            pady=3,
+        )
+        return entry
 
     def _render_product_row(
         self,
         vars_,
     ):
-
         row = len(self.product_rows) + 1
-
+        # ============================================================
+        # STT
+        # ============================================================
         ttk.Label(
             self.product_container,
             text=str(row),
@@ -2607,67 +1864,28 @@ class HopDongDuyetGiaFrame(ttk.Frame):
             padx=3,
             pady=3,
         )
+        fields = [
+            (1, "name"),
+            (2, "brand"),
+            (3, "quantity"),
+            (4, "unit"),
+            (5, "price1"),
+            (6, "price2"),
+            (7, "price3"),
+            (8, "warranty"),
+            (9, "note"),
+        ]
 
-        ttk.Entry(
-            self.product_container,
-            textvariable=vars_["name"],
-        ).grid(
-            row=row,
-            column=1,
-            sticky="ew",
-            padx=3,
-            pady=3,
-        )
-
-        ttk.Entry(
-            self.product_container,
-            textvariable=vars_["quantity"],
-        ).grid(
-            row=row,
-            column=2,
-            sticky="ew",
-            padx=3,
-            pady=3,
-        )
-
-        ttk.Entry(
-            self.product_container,
-            textvariable=vars_["unit"],
-        ).grid(
-            row=row,
-            column=3,
-            sticky="ew",
-            padx=3,
-            pady=3,
-        )
-
-        for col, key in [
-            (4, "price1"),
-            (5, "price2"),
-            (6, "price3"),
-        ]:
-            ttk.Entry(
+        for column, key in fields:
+            self._create_entry(
                 self.product_container,
-                textvariable=vars_[key],
-            ).grid(
-                row=row,
-                column=col,
-                sticky="ew",
-                padx=3,
-                pady=3,
+                vars_[key],
+                row,
+                column,
             )
-
-        ttk.Entry(
-            self.product_container,
-            textvariable=vars_["note"],
-        ).grid(
-            row=row,
-            column=7,
-            sticky="ew",
-            padx=3,
-            pady=3,
-        )
-
+        # ============================================================
+        # XÓA
+        # ============================================================
         if row > 1:
             ttk.Button(
                 self.product_container,
@@ -2675,12 +1893,83 @@ class HopDongDuyetGiaFrame(ttk.Frame):
                 command=lambda r=row: self.remove_product(r),
             ).grid(
                 row=row,
-                column=8,
+                column=10,
                 padx=3,
                 pady=3,
             )
-
         self.product_rows.append(vars_)
+
+    def remove_product(self, row_index):
+        """
+        Xóa hạng mục theo số dòng và đánh lại STT.
+
+        row_index:
+            STT của hạng mục trên giao diện, bắt đầu từ 1.
+        """
+
+        # Không cho xóa nếu chỉ còn 1 hạng mục
+        if len(self.product_rows) <= 1:
+            messagebox.showwarning(
+                "Không thể xóa",
+                "Phải có ít nhất 1 hạng mục.",
+            )
+            return
+
+        # Kiểm tra chỉ số hợp lệ
+        if row_index < 1 or row_index > len(self.product_rows):
+            return
+
+        # ------------------------------------------------------------
+        # Xóa dữ liệu trong danh sách
+        # ------------------------------------------------------------
+
+        index = row_index - 1
+
+        self.product_rows.pop(index)
+
+        # ------------------------------------------------------------
+        # Xóa toàn bộ widget của các dòng sản phẩm
+        # ------------------------------------------------------------
+
+        for widget in self.product_container.grid_slaves():
+            info = widget.grid_info()
+
+            try:
+                row = int(info["row"])
+            except (ValueError, TypeError):
+                continue
+
+            # Giữ:
+            # row 0   = header
+            # row 999 = nút thêm
+            if row != 0 and row != 999:
+                widget.destroy()
+
+        # ------------------------------------------------------------
+        # Vẽ lại toàn bộ sản phẩm
+        # ------------------------------------------------------------
+
+        old_product_rows = self.product_rows.copy()
+
+        self.product_rows = []
+
+        for vars_ in old_product_rows:
+            self._render_product_row(vars_)
+
+        # ------------------------------------------------------------
+        # Cập nhật nút Thêm hạng mục
+        # ------------------------------------------------------------
+
+        self.update_add_button()
+
+        # ------------------------------------------------------------
+        # Cập nhật tổng nếu có
+        # ------------------------------------------------------------
+        # ------------------------------------------------------------
+        # Cập nhật giao diện
+        # ------------------------------------------------------------
+
+        self.product_container.update_idletasks()
 
     def update_add_button(self):
         """
@@ -2701,7 +1990,7 @@ class HopDongDuyetGiaFrame(ttk.Frame):
             ).grid(
                 row=999,
                 column=0,
-                columnspan=9,
+                columnspan=11,
                 sticky="w",
                 padx=3,
                 pady=8,
@@ -2768,32 +2057,22 @@ class HopDongDuyetGiaFrame(ttk.Frame):
     # ========================================================
 
     def get_data(self):
-
-        vendors = []
-
-        for vendor in self.vendor_vars:
-            name = vendor["name"].get().strip()
-
-            if not name:
-                continue
-
-            vendors.append(
-                {
-                    "name": name,
-                    "nang_luc": vendor["nang_luc"].get(),
-                    "ky_thuat": vendor["ky_thuat"].get(),
-                    "dia_diem": vendor["dia_diem"].get(),
-                    "thoi_gian": vendor["thoi_gian"].get(),
-                    "cach_thanh_toan": vendor["cach_thanh_toan"].get(),
-                }
-            )
+        vendors = [
+            {
+                "name": v["name"].get().strip(),
+                "nang_luc": v["nang_luc"].get().strip(),
+                "ky_thuat": v["ky_thuat"].get().strip(),
+                "dia_diem": v["dia_diem"].get().strip(),
+                "thoi_gian": v["thoi_gian"].get().strip(),
+                "cach_thanh_toan": v["cach_thanh_toan"].get().strip(),
+            }
+            for v in self.vendor_vars
+            if v["name"].get().strip()
+        ]
 
         products = []
 
-        for index, row in enumerate(
-            self.product_rows,
-            start=1,
-        ):
+        for index, row in enumerate(self.product_rows, 1):
             name = row["name"].get().strip()
 
             if not name:
@@ -2803,6 +2082,7 @@ class HopDongDuyetGiaFrame(ttk.Frame):
                 {
                     "id": index,
                     "name": name,
+                    "brand": row["brand"].get().strip(),
                     "quantity": row["quantity"].get().strip(),
                     "unit": row["unit"].get().strip(),
                     "prices": [
@@ -2810,41 +2090,30 @@ class HopDongDuyetGiaFrame(ttk.Frame):
                         row["price2"].get().strip(),
                         row["price3"].get().strip(),
                     ],
+                    "warranty": row["warranty"].get().strip(),
                     "note": row["note"].get().strip(),
                 }
             )
 
-        for product_index, product in enumerate(
-            products,
-            start=1,
-        ):
-            for i in range(len(vendors)):
-                price = product["prices"][i].strip()
+        for pi, product in enumerate(products, 1):
+            for vi in range(len(vendors)):
+                price = product["prices"][vi]
 
-                if not price:
-                    continue
+                if price:
+                    try:
+                        parse_number(price)
+                    except Exception:
+                        raise ValueError(
+                            f"Hạng mục {pi}, giá NCC {vi + 1} không hợp lệ:\n{price}"
+                        )
 
-                try:
-                    parse_number(price)
-                except Exception:  # noqa: BLE001
-                    raise ValueError(
-                        f"Hạng mục {product_index}, "
-                        f"giá NCC {i + 1} không hợp lệ:\n"
-                        f"{price}"
-                    )
         data = {
             "so_duyet": self.so_duyet.get().strip(),
             "ngay": self.ngay.get().strip(),
             "thang": self.thang.get().strip(),
             "nam": self.nam.get().strip(),
-            "ten_duyet_gia": self.ten_duyet_gia.get(
-                "1.0",
-                "end",
-            ).strip(),
-            "muc_dich_mua_sam": self.muc_dich.get(
-                "1.0",
-                "end",
-            ).strip(),
+            "ten_duyet_gia": self.ten_duyet_gia.get("1.0", "end").strip(),
+            "muc_dich_mua_sam": self.muc_dich.get("1.0", "end").strip(),
             "dia_diem": self.dia_diem.get().strip(),
             "ma_hd": self.ma_hd.get().strip(),
             "loai_hd": self.loai_hd.get(),
@@ -2909,19 +2178,8 @@ class HopDongDuyetGiaFrame(ttk.Frame):
             if not output_path:
                 return
 
-            totals = []
-
-            for vendor_index in range(len(data["vendors"])):
-                total = sum(
-                    parse_number(p["prices"][vendor_index])
-                    * parse_number(p["quantity"])
-                    for p in data["products"]
-                )
-
-                totals.append(total)
-
+            totals = self.calculate_vendor_totals(data)
             data["selected_vendor_index"] = totals.index(min(totals))
-
             result = export_duyet_gia(
                 data=data,
                 template_path=TEMPLATE_FILE,
@@ -3002,14 +2260,7 @@ class HopDongDuyetGiaFrame(ttk.Frame):
             if missing:
                 raise ValueError("Chưa nhập: " + ", ".join(missing))
 
-            totals = [
-                sum(
-                    parse_number(p["prices"][i]) * parse_number(p["quantity"])
-                    for p in data["products"]
-                )
-                for i in range(len(data["vendors"]))
-            ]
-
+            totals = self.calculate_vendor_totals(data)
             data["selected_vendor_index"] = totals.index(min(totals))
 
             template = (
@@ -3035,22 +2286,6 @@ class HopDongDuyetGiaFrame(ttk.Frame):
                 f"{datetime.now(VN_TZ).strftime('%Y%m%d_%H%M%S')}"
                 ".docx"
             )
-
-            output_path = filedialog.asksaveasfilename(
-                title="Lưu hợp đồng Word",
-                initialdir=os.path.abspath(DEFAULT_CONTRACT_OUTPUT_DIR),
-                initialfile=default_name,
-                defaultextension=".docx",
-                filetypes=[
-                    (
-                        "Word Document",
-                        "*.docx",
-                    )
-                ],
-            )
-
-            if not output_path:
-                return
 
             generate_contract_docx(self)
 
@@ -3184,15 +2419,5 @@ class HopDongDuyetGiaFrame(ttk.Frame):
             text=(f"Mẫu Word: {os.path.abspath(file_path)}")
         )
 
-    # ========================================================
-    # OUTPUT
-    # ========================================================
-
     def open_output_dir(self):
-        path = os.path.abspath(DEFAULT_OUTPUT_DIR)
-
-        os.makedirs(
-            path,
-            exist_ok=True,
-        )
-        open_file(path)
+        open_dir(DEFAULT_OUTPUT_DIR)

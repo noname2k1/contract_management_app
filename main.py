@@ -1,77 +1,11 @@
 import os
-import tkinter as tk
 from tkinter import messagebox, ttk
 
-from tkinterdnd2 import TkinterDnD
-
+from configs import style_config
 from hop_dong_duyet_gia import HopDongDuyetGiaFrame
 from nghiem_thu_thanh_ly import NghiemThuFrame
-
-
-class ToolTip:
-    """Tooltip nhỏ hiển thị khi rê chuột lên nút."""
-
-    def __init__(self, widget, text, delay=400):
-        self.widget = widget
-        self.text = text
-        self.delay = delay
-        self.tipwindow = None
-        self.after_id = None
-
-        widget.bind("<Enter>", self._schedule, add="+")
-        widget.bind("<Leave>", self._hide, add="+")
-
-    def _schedule(self, _event=None):
-        self._cancel()
-        self.after_id = self.widget.after(
-            self.delay,
-            self._show,
-        )
-
-    def _cancel(self):
-        if self.after_id is not None:
-            try:
-                self.widget.after_cancel(self.after_id)
-            except Exception:
-                pass
-            self.after_id = None
-
-    def _show(self):
-        if self.tipwindow is not None:
-            return
-
-        try:
-            x = self.widget.winfo_rootx() + self.widget.winfo_width() + 8
-            y = self.widget.winfo_rooty() + max(0, self.widget.winfo_height() // 2 - 12)
-
-            self.tipwindow = tw = tk.Toplevel(self.widget)
-            tw.wm_overrideredirect(True)
-            tw.wm_geometry(f"+{x}+{y}")
-
-            label = tk.Label(
-                tw,
-                text=self.text,
-                justify="left",
-                background="#333333",
-                foreground="white",
-                relief="solid",
-                borderwidth=1,
-                padx=8,
-                pady=5,
-                font=("Arial", 9),
-            )
-            label.pack()
-        except Exception:
-            self.tipwindow = None
-
-    def _hide(self, _event=None):
-        self._cancel()
-        if self.tipwindow is not None:
-            try:
-                self.tipwindow.destroy()
-            except Exception:
-                pass
-            self.tipwindow = None
+from tkinterdnd2 import TkinterDnD
+from ui import ToolTip
 
 
 class MainApp:
@@ -83,157 +17,31 @@ class MainApp:
         self.root.minsize(900, 550)
 
         # Trạng thái sidebar
-        self.sidebar_collapsed = False
         self.sidebar_open_width = 235
         self.sidebar_closed_width = 58
         self.sidebar_buttons = []
 
         # ==================================================
-        # STYLE
-        # ==================================================
-
-        # ==================================================
         # STYLE DÙNG CHUNG TOÀN BỘ ỨNG DỤNG
         # ==================================================
-
-        style = ttk.Style()
-
-        try:
-            style.theme_use("vista")
-        except Exception:  # noqa: BLE001, S110
-            pass
-
-        # ------------------------------
-        # NỀN CHUNG
-        # ------------------------------
-
-        style.configure(
-            "TFrame",
-            background="#f2f2f2",
-        )
-
-        style.configure(
-            "TLabelframe",
-            background="#f2f2f2",
-        )
-
-        style.configure(
-            "TLabelframe.Label",
-            background="#f2f2f2",
-            font=("Arial", 10),
-        )
-
-        # ------------------------------
-        # LABEL
-        # ------------------------------
-
-        style.configure(
-            "TLabel",
-            background="#f2f2f2",
-            font=("Arial", 10),
-        )
-
-        style.configure(
-            "AppTitle.TLabel",
-            background="#f2f2f2",
-            font=("Arial", 22, "bold"),
-        )
-
-        style.configure(
-            "PageTitle.TLabel",
-            background="#f2f2f2",
-            font=("Arial", 18, "bold"),
-        )
-
-        style.configure(
-            "Section.TLabel",
-            background="#f2f2f2",
-            font=("Arial", 11, "bold"),
-        )
-
-        style.configure(
-            "Header.TLabel",
-            background="#f2f2f2",
-            font=("Arial", 10, "bold"),
-        )
-
-        # ------------------------------
-        # BUTTON
-        # ------------------------------
-
-        style.configure(
-            "TButton",
-            font=("Arial", 10),
-            padding=(8, 4),
-        )
-
-        style.configure(
-            "Menu.TButton",
-            font=("Arial", 10),
-            padding=(10, 8),
-        )
-
-        style.configure(
-            "Action.TButton",
-            font=("Arial", 10, "bold"),
-            padding=(10, 6),
-        )
-
-        # ------------------------------
-        # RADIOBUTTON
-        # ------------------------------
-
-        style.configure(
-            "TRadiobutton",
-            background="#f2f2f2",
-            font=("Arial", 10),
-        )
-
-        # ------------------------------
-        # ENTRY
-        # ------------------------------
-
-        style.configure(
-            "TEntry",
-            padding=(4, 3),
-        )
-
-        # ------------------------------
-        # TREEVIEW
-        # ------------------------------
-
-        style.configure(
-            "Treeview",
-            font=("Arial", 9),
-            rowheight=24,
-        )
-
-        style.configure(
-            "Treeview.Heading",
-            font=("Arial", 9, "bold"),
-            padding=(4, 4),
-        )
+        style_config()
         # ==================================================
         # HEADER
         # ==================================================
-
         header = ttk.Frame(self.root)
         header.pack(
             fill="x",
             padx=10,
             pady=10,
         )
-
         ttk.Label(
             header,
             text="HỆ THỐNG QUẢN LÝ TÀI LIỆU",
             style="AppTitle.TLabel",
         ).pack(side="left")
-
         # ==================================================
         # BODY
         # ==================================================
-
         body = ttk.Frame(self.root)
         body.pack(
             fill="both",
@@ -241,7 +49,6 @@ class MainApp:
             padx=20,
             pady=10,
         )
-
         # ==================================================
         # SIDEBAR
         # ==================================================
@@ -263,7 +70,7 @@ class MainApp:
         # Nút thu gọn / mở rộng
         self.sidebar_toggle = ttk.Button(
             self.sidebar,
-            text="◀",
+            text="◀◀",
             style="Menu.TButton",
             command=self.toggle_sidebar,
         )
@@ -320,6 +127,9 @@ class MainApp:
             self.exit_app,
         )
 
+        # Mặc định thu nhỏ sidebar
+        self.sidebar_collapsed = False
+        self.toggle_sidebar()
         # ==================================================
         # CONTENT
         # ==================================================
@@ -389,7 +199,7 @@ class MainApp:
             )
 
             self.sidebar_toggle.configure(
-                text="▶",
+                text="▶▶",
             )
 
             for item in self.sidebar_buttons:
@@ -405,7 +215,7 @@ class MainApp:
             )
 
             self.sidebar_toggle.configure(
-                text="◀",
+                text="◀◀",
             )
 
             for item in self.sidebar_buttons:
@@ -605,7 +415,5 @@ class MainApp:
 
 if __name__ == "__main__":
     root = TkinterDnD.Tk()
-
     app = MainApp(root)
-
     root.mainloop()

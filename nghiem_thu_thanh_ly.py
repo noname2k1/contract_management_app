@@ -1,10 +1,12 @@
-# nghiem_thu_frame:
 import os
 import tkinter as tk
 import traceback
 from datetime import datetime
 from tkinter import filedialog, messagebox, ttk
 
+from click import confirm
+from openpyxl import load_workbook
+from ui import ScrollableFrame
 from utils import (
     calculate_service_totals,
     flatten_jobs,
@@ -13,303 +15,8 @@ from utils import (
     number_to_vietnamese_words,
     open_file,
     parse_number,
+    setup_file_drop,
 )
-
-# ============================================================
-# SCROLLABLE FRAME
-# ============================================================
-# Không còn canvas lồng với main.py.
-# Chỉ màn hình này quản lý scrollbar.
-# ============================================================
-
-
-class ScrollableFrame(ttk.Frame):
-    def __init__(
-        self,
-        parent,
-    ):
-        super().__init__(parent)
-
-        # ========================================================
-        # CANVAS
-        # ========================================================
-
-        self.canvas = tk.Canvas(
-            self,
-            highlightthickness=0,
-            borderwidth=0,
-        )
-
-        # ========================================================
-        # SCROLLBAR DỌC
-        # ========================================================
-
-        self.v_scrollbar = ttk.Scrollbar(
-            self,
-            orient="vertical",
-            command=self.canvas.yview,
-        )
-
-        # ========================================================
-        # SCROLLBAR NGANG
-        # ========================================================
-
-        self.h_scrollbar = ttk.Scrollbar(
-            self,
-            orient="horizontal",
-            command=self.canvas.xview,
-        )
-
-        # ========================================================
-        # FRAME CHỨA TOÀN BỘ NỘI DUNG
-        # ========================================================
-
-        self.inner = ttk.Frame(self.canvas)
-
-        self.window_id = self.canvas.create_window(
-            (0, 0),
-            window=self.inner,
-            anchor="nw",
-        )
-
-        # ========================================================
-        # KẾT NỐI SCROLLBAR
-        # ========================================================
-
-        self.canvas.configure(
-            yscrollcommand=self.v_scrollbar.set,
-            xscrollcommand=self.h_scrollbar.set,
-        )
-
-        # ========================================================
-        # LAYOUT
-        # ========================================================
-
-        self.canvas.grid(
-            row=0,
-            column=0,
-            sticky="nsew",
-        )
-
-        self.v_scrollbar.grid(
-            row=0,
-            column=1,
-            sticky="ns",
-        )
-
-        self.h_scrollbar.grid(
-            row=1,
-            column=0,
-            sticky="ew",
-        )
-
-        self.rowconfigure(
-            0,
-            weight=1,
-        )
-
-        self.columnconfigure(
-            0,
-            weight=1,
-        )
-
-        # ========================================================
-        # CẬP NHẬT VÙNG SCROLL
-        # ========================================================
-
-        self.inner.bind(
-            "<Configure>",
-            self._update_scrollregion,
-        )
-
-        self.canvas.bind(
-            "<Configure>",
-            self._on_canvas_configure,
-        )
-
-        # ========================================================
-        # MOUSE WHEEL
-        # ========================================================
-
-        self.canvas.bind(
-            "<Enter>",
-            self._bind_mousewheel,
-        )
-
-        self.canvas.bind(
-            "<Leave>",
-            self._unbind_mousewheel,
-        )
-
-        self.inner.bind(
-            "<Enter>",
-            self._bind_mousewheel,
-        )
-
-        self.inner.bind(
-            "<Leave>",
-            self._unbind_mousewheel,
-        )
-
-        # ========================================================
-        # SHIFT + MOUSE WHEEL
-        # -> CUỘN NGANG
-        # ========================================================
-
-        self.canvas.bind(
-            "<Shift-MouseWheel>",
-            self._on_shift_mousewheel,
-        )
-
-        self.inner.bind(
-            "<Shift-MouseWheel>",
-            self._on_shift_mousewheel,
-        )
-
-        # ========================================================
-        # PHÍM MŨI TÊN
-        # ========================================================
-
-        self.canvas.bind(
-            "<Left>",
-            self._scroll_left,
-        )
-
-        self.canvas.bind(
-            "<Right>",
-            self._scroll_right,
-        )
-
-        # ========================================================
-        # LUÔN BẮT ĐẦU Ở ĐẦU
-        # ========================================================
-
-        self.after_idle(self.scroll_to_top)
-
-    # ========================================================
-    # SCROLL REGION
-    # ========================================================
-
-    def _update_scrollregion(
-        self,
-        event=None,
-    ):
-        bbox = self.canvas.bbox("all")
-
-        if bbox:
-            self.canvas.configure(scrollregion=bbox)
-
-    # ========================================================
-    # CANVAS RESIZE
-    # ========================================================
-
-    def _on_canvas_configure(
-        self,
-        event,
-    ):
-        """
-        Không ép chiều rộng inner bằng canvas.
-
-        Đây là điểm quan trọng để scrollbar ngang hoạt động.
-        """
-
-        self._update_scrollregion()
-
-    # ========================================================
-    # BIND MOUSE WHEEL
-    # ========================================================
-
-    def _bind_mousewheel(
-        self,
-        event=None,
-    ):
-        self.canvas.bind_all(
-            "<MouseWheel>",
-            self._on_mousewheel,
-        )
-
-    # ========================================================
-    # UNBIND MOUSE WHEEL
-    # ========================================================
-
-    def _unbind_mousewheel(
-        self,
-        event=None,
-    ):
-        self.canvas.unbind_all("<MouseWheel>")
-
-    # ========================================================
-    # CUỘN DỌC
-    # ========================================================
-
-    def _on_mousewheel(
-        self,
-        event,
-    ):
-        if event.delta:
-            self.canvas.yview_scroll(
-                int(-1 * (event.delta / 120)),
-                "units",
-            )
-
-    # ========================================================
-    # SHIFT + MOUSE WHEEL
-    # -> CUỘN NGANG
-    # ========================================================
-
-    def _on_shift_mousewheel(
-        self,
-        event,
-    ):
-        if event.delta:
-            self.canvas.xview_scroll(
-                int(-1 * (event.delta / 120)),
-                "units",
-            )
-
-        return "break"
-
-    # ========================================================
-    # CUỘN SANG TRÁI
-    # ========================================================
-
-    def _scroll_left(
-        self,
-        event=None,
-    ):
-        self.canvas.xview_scroll(
-            -3,
-            "units",
-        )
-
-        return "break"
-
-    # ========================================================
-    # CUỘN SANG PHẢI
-    # ========================================================
-
-    def _scroll_right(
-        self,
-        event=None,
-    ):
-        self.canvas.xview_scroll(
-            3,
-            "units",
-        )
-
-        return "break"
-
-    # ========================================================
-    # VỀ ĐẦU
-    # ========================================================
-
-    def scroll_to_top(
-        self,
-    ):
-        self.canvas.yview_moveto(0)
-
-        self.canvas.xview_moveto(0)
-
 
 # ============================================================
 # CONFIG
@@ -369,8 +76,8 @@ class NghiemThuFrame(ttk.Frame):
         # ----------------------------------------------------
         # COMMON
         # ----------------------------------------------------
-        self.ma_hd = tk.StringVar(value="08220926/HĐKT/CK83/ITG/2026")
-        self.ngay_hd = tk.StringVar(value="22/09/2026")
+        self.ma_hd = tk.StringVar(value="HD-08220926/2026")
+        self.ngay_hd = tk.StringVar(value="7/10/2026")
         self.ngay_nt = tk.StringVar(value=datetime.now().strftime("%d/%m/%Y"))  # noqa: DTZ005
         self.ten_doi_tac = tk.StringVar(value="Công Ty Cổ Phần Công Nghệ ITG")
 
@@ -431,6 +138,93 @@ class NghiemThuFrame(ttk.Frame):
             parent=self,
         )
 
+    def clear_all_values(self):
+        """Xóa toàn bộ dữ liệu đã nhập trên form."""
+
+        confirm = messagebox.askyesno(
+            "Xác nhận", "Bạn có chắc chắn muốn xóa toàn bộ dữ liệu đã nhập không?"
+        )
+
+        if not confirm:
+            return
+        # ============================================================
+        # 1. XÓA CÁC StringVar
+        # ============================================================
+        variables = [
+            # Thông tin chung
+            self.ma_hd,
+            self.ngay_hd,
+            self.ngay_nt,
+            self.ten_doi_tac,
+            self.ma_nt,
+            self.ma_tl,
+            self.dia_chi_doi_tac,
+            self.sdt_doi_tac,
+            self.ma_so_thue_doi_tac,
+            self.dai_dien_doi_tac,
+            self.chuc_vu_dai_dien_doi_tac,
+            self.stk_doi_tac,
+            self.ngan_hang_doi_tac,
+            self.chi_nhanh_bank_doi_tac,
+            self.tien_da_thanh_toan,
+            # Mua bán
+            self.ten_bbnt,
+            self.hang_muc_nt_hdmb,
+            self.gio_bat_dau_nt,
+            self.gio_ket_thuc_nt,
+            self.muc_dich_hdmb,
+        ]
+
+        for var in variables:
+            var.set("")
+
+        # ============================================================
+        # 2. XÓA DANH SÁCH CÔNG VIỆC
+        # ============================================================
+        self.jobs.clear()
+
+        # ============================================================
+        # 3. XÓA DANH SÁCH THÀNH VIÊN
+        # ============================================================
+        self.my_group.clear()
+        self.partner_group.clear()
+
+        # ============================================================
+        # 4. XÓA DANH SÁCH SẢN PHẨM
+        # ============================================================
+        self.products.clear()
+
+        # ============================================================
+        # 5. CẬP NHẬT TREEVIEW
+        # ============================================================
+        if hasattr(self, "refresh_job_tree"):
+            self.refresh_job_tree()
+
+        if hasattr(self, "refresh_my_group"):
+            self.refresh_my_group()
+
+        if hasattr(self, "refresh_partner_group"):
+            self.refresh_partner_group()
+
+        if hasattr(self, "refresh_products"):
+            self.refresh_products()
+
+        # ============================================================
+        # 6. ĐƯA LOẠI HỢP ĐỒNG VỀ MẶC ĐỊNH
+        # ============================================================
+        self.loai_hd.set("Dịch vụ")
+
+        if hasattr(self, "change_contract_type"):
+            self.change_contract_type()
+
+        # ============================================================
+        # 7. ĐƯA CON TRỎ VỀ Ô ĐẦU TIÊN
+        # ============================================================
+        try:
+            self.entry_ma_hd.focus_set()
+        except AttributeError:
+            pass
+
     def build_ui(self):
         # ========================================================
         # CHỈ DÙNG MỘT SCROLLABLE FRAME
@@ -461,7 +255,7 @@ class NghiemThuFrame(ttk.Frame):
         # Chọn file / xuất file
         self.bottom = ttk.Frame(self.form)
         self.bottom.pack(fill="x", padx=10, pady=5)
-
+        # Chọn template nghiệm thu
         self.template_row = ttk.Frame(self.bottom)
         self.template_row.pack(fill="x", pady=2)
 
@@ -478,12 +272,11 @@ class NghiemThuFrame(ttk.Frame):
             style="NTFile.TButton",
             command=self.select_template,
         ).pack(side="left", padx=5)
-
-        self.template_thanh_li_frame = ttk.Frame(self.template_row)
+        # Chọn template thanh lý (chỉ dùng khi loại hợp đồng là Dịch vụ)
+        self.template_thanh_li_frame = ttk.Frame(self.bottom)
         self.template_thanh_li_frame.pack(
             side="left",
             fill="x",
-            expand=True,
         )
 
         self.template_thanh_li_label = ttk.Label(
@@ -494,7 +287,6 @@ class NghiemThuFrame(ttk.Frame):
         self.template_thanh_li_label.pack(
             side="left",
             fill="x",
-            expand=True,
         )
 
         ttk.Button(
@@ -503,7 +295,7 @@ class NghiemThuFrame(ttk.Frame):
             style="NTFile.TButton",
             command=self.select_template_thanh_li,
         ).pack(side="right", padx=5)
-
+        # xuất word
         self.export_row = ttk.Frame(self.bottom)
         self.export_row.pack(fill="x", pady=5)
 
@@ -513,6 +305,44 @@ class NghiemThuFrame(ttk.Frame):
             style="NTSuccess.TButton",
             command=self.export_docx,
         ).pack(side="right", padx=5)
+
+        ttk.Button(
+            self.export_row,
+            text="🗑 Xóa tất cả",
+            style="NTSuccess.TButton",
+            command=self.clear_all_values,
+        ).pack(side="right", padx=3)
+
+        # kéo thả file excel
+
+        self.drop_area = tk.Label(
+            self,
+            text=("📥 KÉO THẢ FILE EXCEL VÀO ĐÂY\n(.xlsx / .xlsm)"),
+            font=(
+                "Arial",
+                11,
+                "bold",
+            ),
+            relief="groove",
+            bd=2,
+            padx=20,
+            pady=12,
+            cursor="hand2",
+        )
+
+        self.drop_area.pack(
+            fill="x",
+            padx=10,
+            pady=(3, 6),
+        )
+
+        setup_file_drop(
+            widget=self.drop_area,
+            callback=self.import_excel_file,
+            extensions=(".xlsx", ".xlsm"),
+            normal_text="📥 KÉO THẢ FILE EXCEL VÀO ĐÂY\n(.xlsx / .xlsm)",
+            hover_text="📥 THẢ FILE EXCEL TẠI ĐÂY",
+        )
 
         # Loại hợp đồng
         self.info_frame = ttk.LabelFrame(
@@ -1580,6 +1410,284 @@ class NghiemThuFrame(ttk.Frame):
                     sl_thucte,
                     difference,
                 ),
+            )
+
+    # ========================================================
+    # IMPORT EXCEL
+    # ========================================================
+
+    @staticmethod
+    def _excel_text(value):
+        """Chuyển giá trị Excel thành chuỗi an toàn cho Entry/StringVar."""
+        if value is None:
+            return ""
+        if isinstance(value, datetime):
+            return value.strftime("%d/%m/%Y")
+        return str(value).strip()
+
+    @staticmethod
+    def _excel_number(value, default=0):
+        """Đọc số từ Excel, hỗ trợ ô trống và số dạng chuỗi."""
+        if value in (None, ""):
+            return default
+        if isinstance(value, (int, float)):
+            return value
+        return parse_number(str(value).strip())
+
+    def _set_var_from_excel(self, variable, value):
+        """Gán giá trị Excel vào tk.StringVar."""
+        variable.set(self._excel_text(value))
+
+    def import_excel_file(self, file_path):
+        """Đọc file Excel kéo-thả và tự động điền toàn bộ form.
+
+        Cấu trúc file chuẩn:
+            THONG_TIN_CHUNG : các trường StringVar chung + thông tin đối tác
+            DICH_VU         : danh sách công việc, hỗ trợ STT 1 / 1.1 / 1.2...
+            THANH_VIEN      : thành viên my / partner
+            MUA_BAN         : thông tin biên bản + danh sách sản phẩm
+        """
+        try:
+            # tkinterdnd2 có thể trả về chuỗi có {} khi đường dẫn chứa khoảng trắng.
+            if isinstance(file_path, (tuple, list)):
+                file_path = file_path[0] if file_path else ""
+            file_path = str(file_path or "").strip().strip("{}")
+
+            if not file_path:
+                return
+
+            if not file_path.lower().endswith((".xlsx", ".xlsm")):
+                raise ValueError("Chỉ hỗ trợ file Excel .xlsx hoặc .xlsm.")
+
+            if not os.path.exists(file_path):
+                raise FileNotFoundError(f"Không tìm thấy file Excel:\n{file_path}")
+
+            wb = load_workbook(file_path, data_only=True, read_only=True)
+            required_sheets = {"THONG_TIN_CHUNG"}
+            missing = required_sheets - set(wb.sheetnames)
+            if missing:
+                raise ValueError(
+                    "File Excel không đúng mẫu. Thiếu sheet: "
+                    + ", ".join(sorted(missing))
+                )
+
+            # ----------------------------------------------------
+            # 1. THÔNG TIN CHUNG
+            # ----------------------------------------------------
+            common_vars = {
+                "loai_hd": self.loai_hd,
+                "ma_hd": self.ma_hd,
+                "ngay_hd": self.ngay_hd,
+                "ngay_nt": self.ngay_nt,
+                "ten_doi_tac": self.ten_doi_tac,
+                "ma_nt": self.ma_nt,
+                "ma_tl": self.ma_tl,
+                "dia_chi_doi_tac": self.dia_chi_doi_tac,
+                "sdt_doi_tac": self.sdt_doi_tac,
+                "ma_so_thue_doi_tac": self.ma_so_thue_doi_tac,
+                "dai_dien_doi_tac": self.dai_dien_doi_tac,
+                "chuc_vu_dai_dien_doi_tac": self.chuc_vu_dai_dien_doi_tac,
+                "stk_doi_tac": self.stk_doi_tac,
+                "ngan_hang_doi_tac": self.ngan_hang_doi_tac,
+                "chi_nhanh_bank_doi_tac": self.chi_nhanh_bank_doi_tac,
+                "tien_da_thanh_toan": self.tien_da_thanh_toan,
+            }
+
+            ws = wb["THONG_TIN_CHUNG"]
+            common_header = [
+                self._excel_text(c.value).lower()
+                for c in next(ws.iter_rows(min_row=1, max_row=1))
+            ]
+            header_index = {name: i for i, name in enumerate(common_header)}
+
+            if "variable" not in header_index or "giá trị" not in header_index:
+                raise ValueError(
+                    "Sheet THONG_TIN_CHUNG phải có cột 'variable' và 'Giá trị'."
+                )
+
+            for row in ws.iter_rows(min_row=2, values_only=True):
+                key = self._excel_text(row[header_index["variable"]])
+                if key in common_vars:
+                    value = row[header_index["giá trị"]]
+                    self._set_var_from_excel(common_vars[key], value)
+
+            # Loại hợp đồng được quyết định sau khi đọc Excel.
+            loai = self.loai_hd.get().strip().lower()
+            if loai not in {"dịch vụ", "mua bán"}:
+                raise ValueError("Trường loai_hd phải là 'Dịch vụ' hoặc 'Mua bán'.")
+            self.loai_hd.set("Dịch vụ" if loai == "dịch vụ" else "Mua bán")
+            self.change_contract_type()
+
+            # ----------------------------------------------------
+            # 2. DỊCH VỤ
+            # ----------------------------------------------------
+            if "DICH_VU" in wb.sheetnames:
+                ws = wb["DICH_VU"]
+                rows = list(ws.iter_rows(min_row=2, values_only=True))
+                self.jobs = []
+
+                for row in rows:
+                    if not row or not self._excel_text(row[0]):
+                        continue
+
+                    stt = self._excel_text(row[0])
+                    name = self._excel_text(row[1])
+                    work = self._excel_text(row[2])
+                    unit = self._excel_text(row[3])
+                    quantity = self._excel_number(row[4], 1)
+                    price = self._excel_number(row[5], 0)
+                    total = self._excel_number(row[6], quantity * price)
+
+                    if not name:
+                        continue
+
+                    # STT dạng 1.1 / 1.2 là công việc con.
+                    if "." in stt:
+                        parent_stt = stt.split(".", 1)[0]
+                        parent, _ = self.find_job_by_stt(parent_stt)
+                        if parent is None:
+                            raise ValueError(
+                                f"DICH_VU: không tìm thấy công việc cha của STT {stt}."
+                            )
+                        parent.setdefault("children", []).append(
+                            {
+                                "stt": stt,
+                                "ten_dich_vu": name,
+                                "cong_viec_thuc_hien": work,
+                            }
+                        )
+                    else:
+                        self.jobs.append(
+                            {
+                                "stt": stt,
+                                "ten_dich_vu": name,
+                                "cong_viec_thuc_hien": work,
+                                "don_vi": unit or "Gói",
+                                "so_luong": quantity,
+                                "don_gia": price,
+                                "thanh_tien": total,
+                                "children": [],
+                            }
+                        )
+
+                self.reindex_jobs()
+                self.refresh_job_tree()
+
+            # ----------------------------------------------------
+            # 3. THÀNH VIÊN
+            # ----------------------------------------------------
+            if "THANH_VIEN" in wb.sheetnames:
+                ws = wb["THANH_VIEN"]
+                self.my_group = []
+                self.partner_group = []
+
+                for row in ws.iter_rows(min_row=2, values_only=True):
+                    if not row:
+                        continue
+                    group_type = self._excel_text(row[0]).lower()
+                    name = self._excel_text(row[2])
+                    role = self._excel_text(row[3])
+                    if not name:
+                        continue
+
+                    if group_type == "my":
+                        self.my_group.append({"stt": 0, "name": name, "role": role})
+                    elif group_type == "partner":
+                        self.partner_group.append(
+                            {"stt": 0, "name": name, "role": role}
+                        )
+
+                self.reindex_members(self.my_group)
+                self.reindex_members(self.partner_group)
+                self.refresh_my_group()
+                self.refresh_partner_group()
+
+            # ----------------------------------------------------
+            # 4. MUA BÁN
+            # ----------------------------------------------------
+            if "MUA_BAN" in wb.sheetnames:
+                ws = wb["MUA_BAN"]
+                sale_vars = {
+                    "ten_bbnt": self.ten_bbnt,
+                    "hang_muc_nt_hdmb": self.hang_muc_nt_hdmb,
+                    "gio_bat_dau_nt": self.gio_bat_dau_nt,
+                    "gio_ket_thuc_nt": self.gio_ket_thuc_nt,
+                    "muc_dich_hdmb": self.muc_dich_hdmb,
+                }
+
+                for row in ws.iter_rows(min_row=2, max_row=6, values_only=True):
+                    if not row:
+                        continue
+                    key = self._excel_text(row[0])
+                    if key in sale_vars:
+                        self._set_var_from_excel(sale_vars[key], row[2])
+
+                # Tìm dòng header sản phẩm bằng tên cột, không phụ thuộc số dòng.
+                product_header_row = None
+                for row_number, row in enumerate(
+                    ws.iter_rows(values_only=True), start=1
+                ):
+                    values = {self._excel_text(v).lower() for v in row}
+                    if {"stt", "name", "unit", "sl_hd", "sl_thucte"}.issubset(values):
+                        product_header_row = row_number
+                        break
+
+                self.products = []
+                if product_header_row:
+                    header = [
+                        self._excel_text(v).lower()
+                        for v in next(
+                            ws.iter_rows(
+                                min_row=product_header_row,
+                                max_row=product_header_row,
+                                values_only=True,
+                            )
+                        )
+                    ]
+                    idx = {name: i for i, name in enumerate(header)}
+
+                    for row in ws.iter_rows(
+                        min_row=product_header_row + 1, values_only=True
+                    ):
+                        if not row:
+                            continue
+                        name = self._excel_text(row[idx["name"]])
+                        if not name:
+                            continue
+                        sl_hd = self._excel_number(row[idx["sl_hd"]], 0)
+                        sl_thucte = self._excel_number(row[idx["sl_thucte"]], 0)
+                        self.products.append(
+                            {
+                                "stt": len(self.products) + 1,
+                                "name": name,
+                                "unit": self._excel_text(row[idx["unit"]]) or "Cái",
+                                "sl_hd": sl_hd,
+                                "sl_thucte": sl_thucte,
+                                "chenh_lech": sl_thucte - sl_hd,
+                            }
+                        )
+
+                self.refresh_products()
+
+            wb.close()
+            self.change_contract_type()
+            self.after_idle(self.scroll_to_top)
+
+            messagebox.showinfo(
+                "Nhập Excel thành công",
+                "Đã đọc file Excel và tự động điền dữ liệu vào biểu mẫu.",
+                parent=self,
+            )
+
+        except Exception as exc:
+            try:
+                wb.close()
+            except Exception:
+                pass
+            messagebox.showerror(
+                "Lỗi nhập Excel",
+                f"Không thể nhập dữ liệu từ file Excel.\n\n{exc}",
+                parent=self,
             )
 
     # ========================================================

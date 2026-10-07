@@ -25,3 +25,13 @@ def open_file(path):
             "Không mở được file",
             f"File đã được tạo nhưng không thể tự mở:\n{exc}",
         )
+
+
+def open_dir(dir_path):
+    path = os.path.abspath(dir_path)
+
+    os.makedirs(
+        path,
+        exist_ok=True,
+    )
+    open_file(path)

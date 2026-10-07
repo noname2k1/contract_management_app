@@ -12,7 +12,7 @@ from .job_utils import (
     calculate_service_totals,
 )
 
-from .file_utils import open_file
+from .file_utils import open_file, open_dir
 
 from .excel_utils import (
     copy_row_style,
@@ -22,3 +22,5 @@ from .excel_utils import (
     prepare_product_area,
     restore_template_drawing,
 )
+
+from .drag_drop import setup_file_drop
